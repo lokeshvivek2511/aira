@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { LayoutDashboard, Users, Settings, FileText, UserCheck, LogOut, Menu, X } from 'lucide-react';
-
+import logo from '../assets/logo.jpg';
 interface NavbarProps {
   currentPage: string;
   onNavigate: (page: string) => void;
@@ -33,7 +33,8 @@ export default function Navbar({ currentPage, onNavigate }: NavbarProps) {
         <div className="flex justify-between h-16">
           <div className="flex items-center">
             <div className="flex-shrink-0 flex items-center">
-              <h1 className="text-2xl font-bold text-blue-600">AIRA Logistics</h1>
+              <img src={logo} alt="AIRA logo" className="w-8 h-8 m-3" />
+                <h1 className="text-2xl font-bold" style={{ color: '#222b13' }}>AIRA Logistics</h1>
             </div>
 
             <div className="hidden md:ml-8 md:flex md:space-x-1">

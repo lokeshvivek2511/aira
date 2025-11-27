@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { LogIn } from 'lucide-react';
+import logo from '../assets/logo.jpg';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -32,11 +33,8 @@ export default function Login() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
         <div className="flex items-center justify-center mb-6">
-          <div className="bg-blue-600 p-3 rounded-full">
-            <LogIn className="w-8 h-8 text-white" />
+            <img src={logo} alt="AIRA logo" className="w-12 h-12" />
           </div>
-        </div>
-
         <h1 className="text-3xl font-bold text-center text-gray-800 mb-2">
           AIRA Logistics
         </h1>
