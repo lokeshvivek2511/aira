@@ -95,7 +95,7 @@ export default function Login() {
             onClick={() => setIsSignUp(!isSignUp)}
             className="text-blue-600 hover:text-blue-700 text-sm font-medium"
           >
-            {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
+            {isSignUp ? 'Already have an account? Sign in' : ""}
           </button>
         </div>
       </div>
