@@ -44,7 +44,10 @@ export default function Dashboard() {
   const [profitPerPickup, setProfitPerPickup] = useState(0);
 
   useEffect(() => {
-    fetchData();
+    const fetchDataAsync = async () => {
+      await fetchData();
+    };
+    fetchDataAsync();
   }, [currentMonth, currentYear]);
 
   const calculateSalary = (packets: number, config: SalaryConfiguration) => {
@@ -107,6 +110,7 @@ export default function Dashboard() {
         .maybeSingle();
 
       setCompanySettings(settings);
+      console.log(settings);
       setProfitPerPacket(settings?.profit_per_packet || 50);
       setProfitPerPickup(settings?.profit_per_packet_pickup || 0);
 
@@ -142,7 +146,7 @@ export default function Dashboard() {
       const totalPacketsPickuped = deliveries?.reduce((sum, d) => sum + (d.packets_pickuped || 0), 0) || 0;
       
       // FIXED: Calculate revenue based on profit per packet settings
-      const calculatedRevenue = (totalPacketsDelivered * profitPerPacket) + (totalPacketsPickuped * profitPerPickup);
+      const calculatedRevenue = (totalPacketsDelivered * settings?.profit_per_packet) + (totalPacketsPickuped * settings?.profit_per_packet_pickup);
       
       const totalExpenses = expenses?.reduce((sum, e) => sum + Number(e.amount), 0) || 0;
 
@@ -183,8 +187,8 @@ export default function Dashboard() {
       const previousWeek = await fetchWeekStats(previousDate);
 
       // FIXED: Weekly profit calculation using settings
-      const currentWeekProfit = ((currentWeek.packets * profitPerPacket) + (currentWeek.pickups * profitPerPickup)) - totalExpenses;
-      const previousWeekProfit = ((previousWeek.packets * profitPerPacket) + (previousWeek.pickups * profitPerPickup)) - totalExpenses;
+      const currentWeekProfit = ((currentWeek.packets * settings?.profit_per_packet) + (currentWeek.pickups * settings?.profit_per_packet_pickup)) - totalExpenses;
+      const previousWeekProfit = ((previousWeek.packets * settings?.profit_per_packet) + (previousWeek.pickups * settings?.profit_per_packet_pickup)) - totalExpenses;
       const profitChange = currentWeekProfit - previousWeekProfit;
       const changePercent = previousWeekProfit !== 0 ? (profitChange / previousWeekProfit) * 100 : 0;
 

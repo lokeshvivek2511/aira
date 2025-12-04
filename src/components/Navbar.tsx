@@ -33,7 +33,7 @@ export default function Navbar({ currentPage, onNavigate }: NavbarProps) {
         <div className="flex justify-between h-16">
           <div className="flex items-center">
             <div className="flex-shrink-0 flex items-center">
-              <h1 className="text-2xl font-bold text-blue-600">AIRA Logistics</h1>
+              <h1 className="text-2xl font-bold text-[#445626]">AIRA Logistics</h1>
             </div>
 
             <div className="hidden md:ml-8 md:flex md:space-x-1">
