@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { supabase, Employee, SalaryConfiguration } from '../lib/supabase';
-import { User, TrendingUp, Award, X } from 'lucide-react';
+import { supabase, Employee, SalaryConfiguration, CompanySettings } from '../lib/supabase';
+import { User, TrendingUp, Award, X, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 interface EmployeeStats {
@@ -80,127 +80,280 @@ function SalaryBreakdownModal({ stats, salaryConfig, onClose }: SalaryBreakdownM
   );
 }
 
+interface ReportModalProps {
+  employees: Employee[];
+  salaryConfig: SalaryConfiguration | null;
+  companySettings: CompanySettings | null;
+  onClose: () => void;
+}
+
+function ReportModal({ employees, salaryConfig, companySettings, onClose }: ReportModalProps) {
+  const [reportMode, setReportMode] = useState<'month' | 'week' | 'range'>('month');
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [weekStartDate, setWeekStartDate] = useState('');
+  const [customFromDate, setCustomFromDate] = useState('');
+  const [customToDate, setCustomToDate] = useState('');
+  const [generating, setGenerating] = useState(false);
+
+  const generateReport = async () => {
+    setGenerating(true);
+    try {
+      let fromDate: string;
+      let toDate: string;
+      let filename: string;
+
+      if (reportMode === 'month') {
+        fromDate = new Date(selectedYear, selectedMonth - 1, 1).toISOString().split('T')[0];
+        toDate = new Date(selectedYear, selectedMonth, 0).toISOString().split('T')[0];
+        const monthName = new Date(selectedYear, selectedMonth - 1).toLocaleString('default', { month: 'long' });
+        filename = `${monthName}_${selectedYear}_report.xlsx`;
+      } else if (reportMode === 'week') {
+        const date = new Date(weekStartDate);
+        const day = date.getDay();
+        const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+        const weekStart = new Date(date.setDate(diff));
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        fromDate = weekStart.toISOString().split('T')[0];
+        toDate = weekEnd.toISOString().split('T')[0];
+        filename = `Week_${fromDate}_to_${toDate}_report.xlsx`;
+      } else {
+        fromDate = customFromDate;
+        toDate = customToDate;
+        filename = `Report_${fromDate}_to_${toDate}.xlsx`;
+      }
+
+      const { data: deliveries } = await supabase
+        .from('daily_deliveries')
+        .select('*')
+        .gte('delivery_date', fromDate)
+        .lte('delivery_date', toDate);
+
+      const dateList: string[] = [];
+      for (let d = new Date(fromDate); d <= new Date(toDate); d.setDate(d.getDate() + 1)) {
+        dateList.push(new Date(d).toISOString().split('T')[0]);
+      }
+
+      // FIXED: Updated header to include profit-based calculations
+      const header = ['Date'];
+      employees.forEach((e) => {
+        header.push(`${e.name} - Delivered`);
+        header.push(`${e.name} - Pickuped`);
+        header.push(`${e.name} - Profit`);
+      });
+      header.push('Total Profit');
+
+      const rows: (string | number)[][] = [header];
+
+      // FIXED: Map now stores delivered, pickuped separately for profit calculation
+      const map = new Map<string, { delivered: number; pickuped: number }>();
+      deliveries?.forEach((d) => {
+        const key = `${d.delivery_date}|${d.employee_id}`;
+        map.set(key, {
+          delivered: d.packets_delivered,
+          pickuped: d.packets_pickuped || 0,
+        });
+      });
+
+      dateList.forEach((date) => {
+        const row: (string | number)[] = [date];
+        let dailyTotal = 0;
+        employees.forEach((e) => {
+          const key = `${date}|${e.id}`;
+          const rec = map.get(key) ?? { delivered: 0, pickuped: 0 };
+          
+          // FIXED: Calculate profit using settings
+          const profit = (rec.delivered * companySettings.profit_per_packet) + (rec.pickuped * companySettings.profit_per_packet_pickup);
+          
+          row.push(rec.delivered);
+          row.push(rec.pickuped);
+          row.push(profit);
+          dailyTotal += profit;
+        });
+        row.push(dailyTotal);
+        rows.push(row);
+      });
+
+      const totalsRow: (string | number)[] = ['Total'];
+      let grandTotal = 0;
+      for (let i = 0; i < employees.length; i++) {
+        let deliveredSum = 0;
+        let pickupSum = 0;
+        let profitSum = 0;
+
+        rows.slice(1).forEach((r) => {
+          const colIndex = 1 + i * 3;
+          deliveredSum += Number(r[colIndex] || 0);
+          pickupSum += Number(r[colIndex + 1] || 0);
+          
+          // FIXED: Calculate profit sum using settings
+          const profit = (Number(r[colIndex] || 0) * companySettings.profit_per_packet) + (Number(r[colIndex + 1] || 0) * companySettings.profit_per_packet_pickup);
+          profitSum += profit;
+        });
+
+        totalsRow.push(deliveredSum);
+        totalsRow.push(pickupSum);
+        totalsRow.push(profitSum);
+        grandTotal += profitSum;
+      }
+      totalsRow.push(grandTotal);
+      rows.push(totalsRow);
+
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Report');
+      XLSX.writeFile(wb, filename);
+
+      alert('Report generated successfully!');
+      onClose();
+    } catch (error) {
+      console.error('Error generating report:', error);
+      alert('Error generating report. Please try again.');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const isValid = () => {
+    if (reportMode === 'month') return true;
+    if (reportMode === 'week') return weekStartDate !== '';
+    return customFromDate !== '' && customToDate !== '';
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-2xl font-bold text-gray-800">Generate Report</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+
+        <div className="space-y-6">
+          <div className="flex gap-4">
+            {['month', 'week', 'range'].map((mode) => (
+              <label key={mode} className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="reportMode"
+                  value={mode}
+                  checked={reportMode === mode}
+                  onChange={(e) => setReportMode(e.target.value as 'month' | 'week' | 'range')}
+                  className="w-4 h-4"
+                />
+                <span className="text-gray-700 capitalize">{mode === 'range' ? 'Custom Range' : `Whole ${mode}`}</span>
+              </label>
+            ))}
+          </div>
+
+          {reportMode === 'month' && (
+            <div className="flex gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Month</label>
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                  className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  {Array.from({ length: 12 }, (_, i) => (
+                    <option key={i + 1} value={i + 1}>
+                      {new Date(2024, i).toLocaleString('default', { month: 'long' })}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Year</label>
+                <input
+                  type="number"
+                  value={selectedYear}
+                  onChange={(e) => setSelectedYear(Number(e.target.value))}
+                  className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent w-32"
+                />
+              </div>
+            </div>
+          )}
+
+          {reportMode === 'week' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Week Start Date</label>
+              <input
+                type="date"
+                value={weekStartDate}
+                onChange={(e) => setWeekStartDate(e.target.value)}
+                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+          )}
+
+          {reportMode === 'range' && (
+            <div className="flex gap-4">
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 mb-2">From Date</label>
+                <input
+                  type="date"
+                  value={customFromDate}
+                  onChange={(e) => setCustomFromDate(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 mb-2">To Date</label>
+                <input
+                  type="date"
+                  value={customToDate}
+                  onChange={(e) => setCustomToDate(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <p className="text-sm text-blue-800">
+              This report will include columns for each employee with Delivered, Pickuped, and Profit data. A totals row will be added at the bottom.
+            </p>
+          </div>
+
+          <div className="flex gap-3 justify-end">
+            <button
+              onClick={onClose}
+              className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={generateReport}
+              disabled={!isValid() || generating}
+              className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Download className="w-4 h-4" />
+              {generating ? 'Generating...' : 'Download Report'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 export default function EmployeeStatus() {
-  // All hooks at the top level
   const [employeeStats, setEmployeeStats] = useState<EmployeeStats[]>([]);
   const [salaryConfig, setSalaryConfig] = useState<SalaryConfiguration | null>(null);
+  const [companySettings, setCompanySettings] = useState<CompanySettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedEmployee, setSelectedEmployee] = useState<EmployeeStats | null>(null);
+  const [showReportModal, setShowReportModal] = useState(false);
   const [filterLevel, setFilterLevel] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'packets' | 'salary' | 'name'>('packets');
   const [searchTerm, setSearchTerm] = useState('');
-  const [showReportModal, setShowReportModal] = useState(false);
-  const [reportMonth, setReportMonth] = useState('');
-  const [reportYear, setReportYear] = useState('');
-  const [reportLoading, setReportLoading] = useState(false);
 
   useEffect(() => {
     fetchData();
   }, []);
-
-  // Helper to fetch stats for selected month/year
-  const fetchStatsForMonthYear = async (month: number, year: number) => {
-    try {
-      const { data: config, error: configError } = await supabase
-        .from('salary_configurations')
-        .select('*')
-        .eq('is_active', true)
-        .maybeSingle();
-      if (configError || !config) return [];
-
-      const { data: employees, error: empError } = await supabase
-        .from('employees')
-        .select('*')
-        .eq('status', 'active')
-        .order('name');
-      if (empError || !employees) return [];
-
-      const startDate = new Date(year, month - 1, 1).toISOString().split('T')[0];
-      const endDate = new Date(year, month, 0).toISOString().split('T')[0];
-
-      const { data: deliveries, error: delError } = await supabase
-        .from('daily_deliveries')
-        .select('*')
-        .gte('delivery_date', startDate)
-        .lte('delivery_date', endDate);
-      if (delError || !deliveries) return [];
-
-      return employees.map((emp: any) => {
-        const empDeliveries = deliveries.filter((d: any) => d.employee_id === emp.id);
-        const totalPackets = empDeliveries.reduce((sum: number, d: any) => sum + d.packets_delivered, 0);
-        const salaryCalc = calculateSalary(totalPackets, config);
-
-        // Find target for this employee if available
-        let target = '';
-        if (config.target_levels && Array.isArray(config.target_levels)) {
-          const level = config.target_levels.find((lvl: any) => lvl.levelName === salaryCalc.achievementLevel);
-          target = level ? level.targetPackets : '';
-        }
-
-        return {
-          name: emp.name,
-          parcels: totalPackets,
-          target: target,
-          achievementLevel: salaryCalc.achievementLevel,
-          baseSalary: salaryCalc.baseSalary,
-          petrol: salaryCalc.allowances,
-          commission: salaryCalc.commission,
-          incentive: salaryCalc.achievementBonus,
-          totalSalary: salaryCalc.totalSalary,
-        };
-      });
-    } catch (err) {
-      console.error('Error generating report:', err);
-      return [];
-    }
-  };
-
-  const handleDownloadReport = () => {
-    setShowReportModal(true);
-  };
-
-  const handleGenerateReport = async () => {
-    if (!reportMonth || !reportYear) return;
-    setReportLoading(true);
-    const stats = await fetchStatsForMonthYear(Number(reportMonth), Number(reportYear));
-    const wsData = [
-      [
-        'Name',
-        'Parcels',
-        'Target',
-        'Achievement level',
-        'Base Salary',
-        'Petrol',
-        'Commission',
-        'Incentive',
-        'Total Salary',
-      ],
-      ...stats.map(emp => [
-        emp.name,
-        emp.parcels,
-        emp.target,
-        emp.achievementLevel,
-        emp.baseSalary,
-        emp.petrol,
-        emp.commission,
-        emp.incentive,
-        emp.totalSalary,
-      ])
-    ];
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Salary Report');
-    const monthNames = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'
-    ];
-    const fileName = `${monthNames[Number(reportMonth) - 1]}-${reportYear}-salary report.xlsx`;
-    XLSX.writeFile(wb, fileName);
-    setReportLoading(false);
-    setShowReportModal(false);
-    setReportMonth('');
-    setReportYear('');
-  };
 
   const calculateSalary = (packets: number, config: SalaryConfiguration) => {
     const baseSalary = config.base_salary;
@@ -232,13 +385,19 @@ export default function EmployeeStatus() {
 
   const fetchData = async () => {
     try {
-      const { data: config, error: configError } = await supabase
+      const { data: settings } = await supabase
+        .from('company_settings')
+        .select('*')
+        .maybeSingle();
+
+      setCompanySettings(settings);
+
+      const { data: config } = await supabase
         .from('salary_configurations')
         .select('*')
         .eq('is_active', true)
         .maybeSingle();
 
-      if (configError) throw configError;
       if (!config) {
         console.error('No active salary configuration found');
         return;
@@ -246,40 +405,40 @@ export default function EmployeeStatus() {
 
       setSalaryConfig(config);
 
-      const { data: employees, error: empError } = await supabase
+      const { data: employees } = await supabase
         .from('employees')
         .select('*')
         .eq('status', 'active')
         .order('name');
 
-      if (empError) throw empError;
+      if (!employees) return;
 
       const currentMonth = new Date().getMonth();
       const currentYear = new Date().getFullYear();
       const startDate = new Date(currentYear, currentMonth, 1).toISOString().split('T')[0];
       const endDate = new Date(currentYear, currentMonth + 1, 0).toISOString().split('T')[0];
 
-      const { data: deliveries, error: delError } = await supabase
+      const { data: deliveries } = await supabase
         .from('daily_deliveries')
         .select('*')
         .gte('delivery_date', startDate)
         .lte('delivery_date', endDate);
 
-      if (delError) throw delError;
-
-      const stats: EmployeeStats[] = (employees || []).map((emp) => {
+      const stats: EmployeeStats[] = employees.map((emp) => {
         const empDeliveries = deliveries?.filter((d) => d.employee_id === emp.id) || [];
         const totalPackets = empDeliveries.reduce((sum, d) => sum + d.packets_delivered, 0);
 
         const salaryCalc = calculateSalary(totalPackets, config);
 
         const sortedLevels = [...config.target_levels].sort((a, b) => a.targetPackets - b.targetPackets);
-        const currentLevelIndex = sortedLevels.findIndex(l => l.levelName === salaryCalc.achievementLevel);
+        const currentLevelIndex = sortedLevels.findIndex((l) => l.levelName === salaryCalc.achievementLevel);
         const nextLevel = currentLevelIndex < sortedLevels.length - 1 ? sortedLevels[currentLevelIndex + 1] : null;
 
         const progress = nextLevel
           ? Math.min((totalPackets / nextLevel.targetPackets) * 100, 100)
-          : salaryCalc.achievementLevel !== 'None' ? 100 : 0;
+          : salaryCalc.achievementLevel !== 'None'
+            ? 100
+            : 0;
 
         return {
           employee: emp,
@@ -293,10 +452,12 @@ export default function EmployeeStatus() {
             totalSalary: salaryCalc.totalSalary,
           },
           progress,
-          nextLevel: nextLevel ? {
-            name: nextLevel.levelName,
-            remaining: nextLevel.targetPackets - totalPackets,
-          } : undefined,
+          nextLevel: nextLevel
+            ? {
+                name: nextLevel.levelName,
+                remaining: nextLevel.targetPackets - totalPackets,
+              }
+            : undefined,
         };
       });
 
@@ -330,73 +491,13 @@ export default function EmployeeStatus() {
 
   return (
     <div className="p-8">
-      {/* Download Report Button */}
-      <div className="mb-4 flex justify-end">
-        <button
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg shadow hover:bg-blue-700"
-          onClick={handleDownloadReport}
-        >
-          Download Report
-        </button>
-      </div>
-
-      {/* Report Modal */}
-      {showReportModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
-            <h2 className="text-xl font-bold mb-4">Select Month and Year</h2>
-            <div className="mb-4">
-              <select
-                className="w-full mb-2 px-3 py-2 border rounded"
-                value={reportMonth}
-                onChange={e => setReportMonth(e.target.value)}
-              >
-                <option value="">Month</option>
-                {Array.from({ length: 12 }, (_, i) => (
-                  <option key={i + 1} value={i + 1}>
-                    {new Date(0, i).toLocaleString('default', { month: 'long' })}
-                  </option>
-                ))}
-              </select>
-              <select
-                className="w-full px-3 py-2 border rounded"
-                value={reportYear}
-                onChange={e => setReportYear(e.target.value)}
-              >
-                <option value="">Year</option>
-                {Array.from({ length: 5 }, (_, i) => {
-                  const year = new Date().getFullYear() - i;
-                  return <option key={year} value={year}>{year}</option>;
-                })}
-              </select>
-            </div>
-            <div className="flex gap-2">
-              <button
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg flex-1"
-                onClick={handleGenerateReport}
-                disabled={!reportMonth || !reportYear || reportLoading}
-              >
-                {reportLoading ? 'Generating...' : 'Generate & Download'}
-              </button>
-              <button
-                className="bg-gray-300 text-gray-800 px-4 py-2 rounded-lg flex-1"
-                onClick={() => setShowReportModal(false)}
-                disabled={reportLoading}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-800 mb-2">Employee Status</h1>
         <p className="text-gray-600">Track performance and salary breakdown</p>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-        <div className="flex flex-col md:flex-row gap-4">
+        <div className="flex flex-col md:flex-row gap-4 items-end">
           <input
             type="text"
             placeholder="Search by name..."
@@ -425,6 +526,13 @@ export default function EmployeeStatus() {
             <option value="salary">Sort by Salary</option>
             <option value="name">Sort by Name</option>
           </select>
+          <button
+            onClick={() => setShowReportModal(true)}
+            className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Download Report
+          </button>
         </div>
       </div>
 
@@ -510,6 +618,15 @@ export default function EmployeeStatus() {
           stats={selectedEmployee}
           salaryConfig={salaryConfig}
           onClose={() => setSelectedEmployee(null)}
+        />
+      )}
+
+      {showReportModal && salaryConfig && (
+        <ReportModal
+          employees={employeeStats.map((s) => s.employee)}
+          salaryConfig={salaryConfig}
+          companySettings={companySettings}
+          onClose={() => setShowReportModal(false)}
         />
       )}
     </div>

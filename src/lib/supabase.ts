@@ -41,6 +41,9 @@ export interface DailyDelivery {
   employee_id: string;
   delivery_date: string;
   packets_delivered: number;
+  packets_pickuped?: number;
+  profit_per_packet_pickup?: number;
+  revenue?: number;
   status: 'pending' | 'completed' | 'verified';
   notes?: string;
   edited_by?: string;
@@ -53,9 +56,20 @@ export interface CompanySettings {
   id: string;
   company_name: string;
   profit_per_packet: number;
+  profit_per_packet_pickup?: number;
   currency: string;
   financial_year_start_month: number;
   financial_year_start_date: number;
   updated_at: string;
   updated_by?: string;
+}
+
+export interface CompanyCommonExpense {
+  id: string;
+  expense_date: string;
+  category: string;
+  amount: number;
+  description?: string;
+  created_at: string;
+  updated_at: string;
 }
